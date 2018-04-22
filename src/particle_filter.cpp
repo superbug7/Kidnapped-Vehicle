@@ -44,6 +44,7 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
 			P.theta = dist_theta(gen);
 			P.weight= 1.0;
 			particles.push_back(P);
+			weights.push_back(P.weight);
 		}
 	}
 	is_initialized = true;
@@ -57,20 +58,20 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 	//  http://www.cplusplus.com/reference/random/default_random_engine/
 
 	default_random_engine gen;
-	double x_new;
-	double y_new;
-	double theta_new;
 
 	for( int i=0 ; i< num_particles; i++)
 	{
 
-		if ( fabs(yaw_rate) < 0.0001){
+		double x_new = particles[i].x;
+		double y_new;
+		double theta_new;
+		if ( fabs(yaw_rate) < 0.00001){
 		x_new = particles[i].x + (velocity * delta_t * cos(theta_new));
 		y_new = particles[i].y + (velocity * delta_t * sin(theta_new));
 		theta_new = particles[i].theta;} 
 		else{
-		x_new = particles[i].x + ((velocity/yaw_rate) * (sin(theta_new) - sin(particles[i].theta)));
-		y_new = particles[i].y + ((velocity/yaw_rate) * (cos(particles[i].theta - cos(theta_new) )));
+		x_new = particles[i].x + (velocity/yaw_rate) * (sin(particles[i].theta + (yaw_rate * delta_t)) - sin(particles[i].theta));
+		y_new = particles[i].y + (velocity/yaw_rate) * (cos(particles[i].theta) - cos(particles[i].theta + (yaw_rate * delta_t)));
 		theta_new = particles[i].theta + yaw_rate * delta_t;}
 		
 
@@ -87,13 +88,15 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 
 }
 
-void ParticleFilter::dataAssociation(std::vector<LandmarkObs> predicted, std::vector<LandmarkObs>& observations) {
+
+void ParticleFilter::dataAssociation(std::vector<LandmarkObs> predicted, std::vector<LandmarkObs>& observations, double sensor_range) {
 	// TODO: Find the predicted measurement that is closest to each observed measurement and assign the 
 	//   observed measurement to this particular landmark.
 	// NOTE: this method will NOT be called by the grading code. But you will probably find it useful to 
 	//   implement this method and use it as a helper during the updateWeights phase.
-
 }
+
+
 
 void ParticleFilter::updateWeights(double sensor_range, double std_landmark[], 
 		const std::vector<LandmarkObs> &observations, const Map &map_landmarks) {
@@ -107,8 +110,11 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 	//   and the following is a good resource for the actual equation to implement (look at equation 
 	//   3.33
 	//   http://planning.cs.uiuc.edu/node99.html
-	 
+	
 
+
+	 double weight_norm = 0.0;
+	
          for(int i =0; i < num_particles;i++)
 	 {
 
@@ -121,9 +127,8 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 		for(int j =0; j < map_landmarks.landmark_list.size() ;j++)
 		{
 			Map::single_landmark_s landmark_curr = map_landmarks.landmark_list[j];
-			double new_dist = dist(p_x, p_y, landmark_curr.x_f, landmark_curr.y_f);
-			if ( new_dist < sensor_range )
-				landmark_predicted.push_back( LandmarkObs { landmark_curr.id_i, landmark_curr.x_f, landmark_curr.y_f});
+			if ((fabs((p_x - landmark_curr.x_f)) <= sensor_range) && (fabs((p_y - landmark_curr.y_f)) <= sensor_range)) {
+				landmark_predicted.push_back( LandmarkObs { landmark_curr.id_i, landmark_curr.x_f, landmark_curr.y_f});}
 		}
 
 		for( int j =0 ; j < observations.size(); j++)
@@ -135,21 +140,18 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 			obs_transformed.push_back(obs_trans);
 		}
 
-		for ( int i=0; i < obs_transformed.size() ; i++)
+		for ( int h=0; h < obs_transformed.size() ; h++)
 		{
-			double min_dist;
+			double min_dist= sensor_range * sensor_range;
+			obs_transformed[h].id = -1;
+
 			for ( int j =0; j < landmark_predicted.size(); j++)
 			{
-				double dista = dist(obs_transformed[i].x, obs_transformed[i].y, landmark_predicted[j].x , landmark_predicted[j].y);
-			        if( j == 0)
+				double dista = dist(obs_transformed[h].x, obs_transformed[h].y, landmark_predicted[j].x , landmark_predicted[j].y);
+				if ( dista < min_dist )
 				{
 					min_dist = dista;
-					obs_transformed[i].id = landmark_predicted[i].id;
-				}
-				else if ( dista < min_dist )
-				{
-					min_dist = dista;
-					obs_transformed[i].id = landmark_predicted[i].id;
+					obs_transformed[h].id = landmark_predicted[j].id;
 					 
 				}
 			}
@@ -161,16 +163,27 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 		{
 			for ( int j=0; j < landmark_predicted.size();j++)
 			{
+				if(obs_transformed[m].id == landmark_predicted[j].id)
+				{
 				double x = pow(obs_transformed[m].x - landmark_predicted[j].x, 2) / ( 2 * pow(std_landmark[0],2));
 				double y = pow(obs_transformed[m].y - landmark_predicted[j].y, 2) / ( 2 * pow(std_landmark[1],2));
 				double w = exp(-(x + y )) / ( 2 * M_PI * std_landmark[0] * std_landmark[1]);
 				particles[i].weight *= w;
+				}
 			}
-		}				
-
-		weights.push_back(particles[i].weight);		
+		}
+		weight_norm += particles[i].weight;				
 	}	
+	for (int i = 0; i < particles.size(); i++) {
+    		particles[i].weight /= weight_norm;
+    		weights[i] = particles[i].weight;
+  		}
+
+
 }
+
+
+
 
 void ParticleFilter::resample() {
 	// TODO: Resample particles with replacement with probability proportional to their weight. 
